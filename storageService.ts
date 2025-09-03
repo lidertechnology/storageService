@@ -1,84 +1,58 @@
-// src/app/core/services/storage.service.ts
-
-import { Injectable } from '@angular/core';
-import {
-  StorageReference,
-  uploadBytesResumable,
-  UploadTask,
-  getDownloadURL,
-  deleteObject,
-  listAll,
-  getMetadata,
-  FullMetadata,
-  ref,
-} from 'firebase/storage';
-import { storage } from '../../firebase/firebase-config';
+import { inject, Injectable, signal, WritableSignal } from '@angular/core';
+import { StatesEnum } from '../../states/states.enum';
+import { deleteObject, getDownloadURL, ref, uploadBytesResumable, UploadTask } from 'firebase/storage';
+import { storage } from '../firebase-config';
 
 @Injectable({
-  providedIn: 'root',
+  providedIn: 'root'
 })
 export class StorageService {
-  constructor() {}
 
-  /**
-   * Sube un archivo a Firebase Storage. Es la responsabilidad de la aplicación
-   * que lo usa definir la ruta (ej. 'usuarios/uid/perfil.jpg').
-   * Retorna una tarea de subida para monitorear el progreso.
-   */
-  async subirArchivo(ruta: string, archivo: File): Promise<UploadTask> {
-    const storageRef = ref(storage, ruta);
-    return uploadBytesResumable(storageRef, archivo);
-  }
+  private readonly storage = inject(Storage);
 
-  /**
-   * Sube múltiples archivos a un directorio de Storage.
-   * Retorna un array de promesas con las URLs de descarga.
-   */
-  async subirMultiplesArchivos(
-    directorio: string,
-    archivos: File[]
-  ): Promise<string[]> {
-    const promesasDeSubida = archivos.map(async (archivo) => {
-      const ruta = `${directorio}/${archivo.name}`;
+  public states: WritableSignal<StatesEnum> = signal(StatesEnum.INACTIVE);
+  public uploadProgress: WritableSignal<number> = signal(0);
+
+  public async subirArchivo(ruta: string, archivo: File): Promise<string> {
+    try {
+      this.states.set(StatesEnum.LOADING);
+      this.uploadProgress.set(0);
+
       const storageRef = ref(storage, ruta);
-      const snapshot = await uploadBytesResumable(storageRef, archivo);
-      return getDownloadURL(snapshot.ref);
-    });
+      const uploadTask: UploadTask = uploadBytesResumable(storageRef, archivo);
 
-    return Promise.all(promesasDeSubida);
+      return new Promise((resolve, reject) => {
+        uploadTask.on('state_changed',
+          (snapshot) => {
+            const progreso = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            this.uploadProgress.set(progreso);
+          },
+          (error) => {
+            this.states.set(StatesEnum.ERROR);
+            reject(error);
+          },
+          async () => {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            this.states.set(StatesEnum.SUCCESS);
+            resolve(url);
+          }
+        );
+      });
+    } catch (error) {
+      this.states.set(StatesEnum.ERROR);
+      throw error;
+    }
   }
 
-  /**
-   * Obtiene la URL de descarga de un archivo ya subido.
-   * Esto es útil para mostrar archivos sin necesidad de volver a subirlos.
-   */
-  async obtenerUrl(ruta: string): Promise<string> {
-    const storageRef = ref(storage, ruta);
-    return getDownloadURL(storageRef);
-  }
-
-  /**
-   * Obtiene los metadatos de un archivo, como el tipo de contenido o el tamaño.
-   */
-  async obtenerMetadatos(ruta: string): Promise<FullMetadata> {
-    const storageRef = ref(storage, ruta);
-    return getMetadata(storageRef);
-  }
-
-  /**
-   * Elimina un archivo de Firebase Storage.
-   */
-  async eliminarArchivo(ruta: string): Promise<void> {
-    const storageRef = ref(storage, ruta);
-    await deleteObject(storageRef);
-  }
-
-  /**
-   * Lista las URLs de descarga de todos los archivos en un directorio.
-   */
-  async listarArchivos(directorio: string): Promise<string[]> {
-    const storageRef = ref(storage, directorio);
-    const files = await listAll(storageRef);
-    return Promise.all(files.items.map((fileRef) => getDownloadURL(fileRef)));
+  public async borrarArchivo(rutaStorage: string): Promise<void> {
+    try {
+      this.states.set(StatesEnum.LOADING);
+      const archivoRef = ref(storage, rutaStorage);
+      await deleteObject(archivoRef);
+      this.states.set(StatesEnum.SUCCESS);
+    } catch (error) {
+      this.states.set(StatesEnum.ERROR);
+      throw error;
+    }
   }
 }
