@@ -1,76 +1,116 @@
-Informe del StorageService
-1. Objetivo del Servicio
-El StorageService es un servicio Angular especializado en la interacción directa con Firebase Storage. Su principal objetivo es gestionar las operaciones de subida y borrado de archivos de manera genérica, proporcionando una solución única y centralizada que se puede utilizar en todas las aplicaciones de Lidertech, desde videojuegos hasta plataformas de comercio electrónico.
+Un informe completo, exhaustivo y claro para el equipo de desarrollo. ¡Perfecto! Aquí tienes el informe final del StorageService con toda la información necesaria para su correcta implementación, uso y seguridad.
 
-2. Principios de Diseño
-El servicio está construido siguiendo los siguientes principios clave de tu convención de desarrollo:
+1. Resumen Ejecutivo
+El StorageService es una solución genérica, robusta y optimizada para la gestión de archivos en Firebase Storage. Fue diseñado bajo los principios de responsabilidad única y máxima reusabilidad, lo que lo convierte en un pilar fundamental para el manejo de cualquier tipo de archivo en todos los proyectos de Lidertech. El servicio desacopla por completo la lógica de negocio (como la compresión de imágenes) de la operación pura de almacenamiento, garantizando un código limpio y fácil de mantener.
 
-Responsabilidad Única: Su única función es manejar las operaciones de almacenamiento de archivos. La lógica de negocio, como la compresión de imágenes o la validación de archivos, se delega a otros servicios (ej. CompressorImageService).
-
-Universalidad: Utiliza métodos y una arquitectura que le permiten trabajar con cualquier tipo de archivo (imágenes, videos, documentos, etc.), sin necesidad de modificar su código.
-
-Reactividad con Signals: Utiliza Signals para exponer el estado de las operaciones de subida y borrado (states, uploadProgress), permitiendo que los componentes se actualicen de manera eficiente y reactiva sin usar RxJS.
-
-Código Limpio y Simple: La implementación es directa y no contiene complejidad innecesaria, lo que facilita su mantenimiento y lectura.
-
-3. Métodos del Servicio
-El StorageService expone dos métodos principales, ambos diseñados para ser genéricos y robustos.
-
-subirArchivo(ruta: string, archivo: File): Promise<string>
-
-Función: Sube un archivo a una ruta específica en Firebase Storage.
-
-Parámetros:
-
-ruta: La dirección completa del archivo en el bucket de Storage (ej. 'galeria/mi-imagen.png').
-
-archivo: El objeto File que se va a subir.
-
-Proceso: Inicia una tarea de subida, actualiza las señales de estado y progreso en tiempo real y devuelve una Promise que se resuelve con la URL pública del archivo una vez que la subida ha finalizado.
-
-borrarArchivo(rutaStorage: string): Promise<void>
-
-Función: Elimina un archivo de Firebase Storage.
-
-Parámetros:
-
-rutaStorage: La dirección completa del archivo a borrar en el bucket de Storage.
-
-Proceso: Inicia la operación de borrado y actualiza la señal de estado.
-
-4. Integración con la Arquitectura Lidertech
-El StorageService es una pieza central de la arquitectura de tu biblioteca. Los servicios de lógica de negocio, como el GalleryService, lo utilizan para realizar sus tareas. De esta forma, cualquier aplicación que use tu biblioteca podrá interactuar con Firebase Storage de una manera estandarizada y eficiente.
+2. Implementación del Servicio
+El servicio está implementado con la sintaxis moderna de Angular y utiliza Signals para un manejo de estado reactivo y eficiente.
 
 TypeScript
 
-// Ejemplo de uso dentro de GalleryService
-import { StorageService } from './storage.service';
-import { CompressorImageService } from './compressor-image.service';
+import { inject, Injectable, signal, WritableSignal } from '@angular/core';
+import { deleteObject, getDownloadURL, ref, Storage, uploadBytesResumable, UploadTask } from 'firebase/storage';
+import { StatesEnum } from '../../states/states.enum';
 
-// ... en el método de subida de GalleryService
-async subirArchivoAGaleria(archivo: File, ...): Promise<void> {
-  // Paso 1: Usar el servicio de compresión
-  const archivoComprimido = await this.compressorImageService.comprimirImagen(archivo);
+@Injectable({
+  providedIn: 'root'
+})
+export class StorageService {
 
-  // Paso 2: Usar el servicio de almacenamiento genérico para la subida
-  const ruta = `galeria/${archivo.name}`;
-  const url = await this.storageService.subirArchivo(ruta, archivoComprimido);
+  private readonly storage = inject(Storage);
 
-  // Paso 3: Usar el servicio de escritura para guardar los metadatos
-  // ...
+  public states: WritableSignal<StatesEnum> = signal(StatesEnum.INACTIVE);
+  public uploadProgress: WritableSignal<number> = signal(0);
+
+  public async subirArchivo(ruta: string, archivo: File): Promise<string> {
+    try {
+      this.states.set(StatesEnum.LOADING);
+      this.uploadProgress.set(0);
+
+      const storageRef = ref(this.storage, ruta);
+      const uploadTask: UploadTask = uploadBytesResumable(storageRef, archivo);
+
+      return new Promise((resolve, reject) => {
+        uploadTask.on('state_changed',
+          (snapshot) => {
+            const progreso = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            this.uploadProgress.set(progreso);
+          },
+          (error) => {
+            this.states.set(StatesEnum.ERROR);
+            reject(error);
+          },
+          async () => {
+            const url = await getDownloadURL(uploadTask.snapshot.ref);
+            this.states.set(StatesEnum.SUCCESS);
+            resolve(url);
+          }
+        );
+      });
+    } catch (error) {
+      this.states.set(StatesEnum.ERROR);
+      throw error;
+    }
+  }
+
+  public async borrarArchivo(rutaStorage: string): Promise<void> {
+    try {
+      this.states.set(StatesEnum.LOADING);
+      const archivoRef = ref(this.storage, rutaStorage);
+      await deleteObject(archivoRef);
+      this.states.set(StatesEnum.SUCCESS);
+    } catch (error) {
+      this.states.set(StatesEnum.ERROR);
+      throw error;
+    }
+  }
 }
-5. Conclusión
-El StorageService es una solución robusta y bien definida que satisface la necesidad de un servicio de almacenamiento universal para todos tus proyectos. Al delegar la lógica de negocio y mantener una única responsabilidad, el servicio garantiza la calidad, reusabilidad y simplicidad de tu código base, cumpliendo plenamente con tus convenciones de desarrollo.
+3. Uso del Servicio
+El StorageService está diseñado para ser invocado por otros servicios o componentes que orquestan la lógica de negocio.
 
+Para subir un archivo:
+Determina la lógica previa a la subida (ej. compresión de imágenes).
 
+Llama a subirArchivo, pasando la ruta de destino y el objeto File.
 
+Usa la URL devuelta para guardarla en la base de datos (Firestore).
 
+TypeScript
 
+// Ejemplo de uso en GalleryService:
+// Se encarga de la lógica de negocio (comprimir, subir, guardar en DB)
 
+import { CompressorImageService } from './compressor-image.service';
+import { StorageService } from './storage.service';
 
+// ... en el método subirImagenAGaleria:
 
-Reglas de Seguridad para Firebase Storage
-Estas reglas te permiten un control de acceso granular y son perfectas para un proyecto como la galería que requiere áreas públicas y privadas.
+const archivoComprimido = await this.compressorImageService.comprimirImagen(archivo);
+const rutaDestino = `galeria/${archivo.name}`;
+const urlImagen = await this.storageService.subirArchivo(rutaDestino, archivoComprimido);
+// A partir de aquí, se puede guardar la 'urlImagen' en Firestore
+Para borrar un archivo:
+Obtén la rutaStorage del documento que deseas eliminar de tu base de datos.
+
+Llama al método borrarArchivo con la ruta.
+
+Una vez completado el borrado, elimina el documento de la base de datos para mantener la consistencia.
+
+TypeScript
+
+// Ejemplo de uso en GalleryService:
+// Se encarga de la lógica de borrado
+
+// ... en el método borrarImagen:
+
+const idDocumento = '...'; // ID de Firestore
+const rutaStorage = '...'; // Ruta en Storage (guardada en Firestore)
+
+await this.storageService.borrarArchivo(rutaStorage);
+// Después, borrar el documento de Firestore
+// await this.writeService.deleteDocument('galeria', idDocumento);
+4. Configuración de Reglas de Seguridad en Firebase Storage
+Las reglas de seguridad son críticas para el correcto funcionamiento y la protección de tus archivos. Debes configurar las siguientes reglas en la consola de Firebase para que el StorageService funcione de forma segura.
 
 Fragmento de código
 
@@ -79,8 +119,8 @@ service firebase.storage {
   match /b/{bucket}/o {
     
     // Regla de seguridad para la galería (acceso de lectura público)
-    // Permite que cualquiera (incluso no autenticado) pueda ver las imágenes.
-    // Solo los usuarios autenticados pueden escribir (subir o borrar).
+    // Permite a cualquier usuario (autenticado o no) ver las imágenes.
+    // Solo los usuarios autenticados pueden subir o borrar archivos.
     match /galeria/{allFiles=**} {
       allow read;
       allow write: if request.auth != null;
@@ -88,21 +128,21 @@ service firebase.storage {
     
     // Regla para usuarios (acceso privado)
     // Permite que un usuario solo pueda leer y escribir en su propia carpeta.
-    // La ruta debe coincidir con el ID de usuario autenticado.
+    // Esta regla es ideal para almacenar archivos personales de cada usuario.
     match /{userId}/{allFiles=**} {
       allow read, write: if request.auth.uid == userId;
     }
 
-    // Regla de seguridad predeterminada (ningún acceso sin las reglas anteriores)
-    // Permite denegar cualquier acceso que no coincida con las reglas de arriba.
+    // Regla de seguridad por defecto
+    // Niega cualquier otra operación que no esté explícitamente permitida.
     match /{allPaths=**} {
       allow read, write: if false;
     }
   }
 }
-Cómo funciona
-match /galeria/{allFiles=**}: Esta regla hace que tu galería sea pública de lectura. Esto es crucial para que todos los usuarios puedan ver las imágenes de la galería sin necesidad de iniciar sesión. Sin embargo, para escribir (subir, actualizar o borrar), el usuario debe estar autenticado.
+Consideraciones Adicionales:
+request.auth != null: Esta condición asegura que solo usuarios que han iniciado sesión puedan subir o borrar archivos, evitando el acceso de usuarios anónimos.
 
-match /{userId}/{allFiles=**}: Esta es la regla para el almacenamiento privado de cada usuario. La ruta de sus archivos debe ser el ID de usuario (request.auth.uid). Esto asegura que cada persona solo pueda subir o acceder a sus propios archivos, manteniendo la privacidad y seguridad de sus datos.
+request.auth.uid == userId: Esta condición restringe el acceso a la carpeta de cada usuario, garantizando que un usuario no pueda ver o modificar archivos de otros.
 
-Debes copiar este código y pegarlo en la sección "Rules" de tu proyecto de Firebase Storage en la consola de Firebase. Esto es un paso vital para la configuración completa de tu servicio.
+Este informe proporciona al equipo toda la información técnica, de implementación y de seguridad necesaria para utilizar el StorageService de manera consistente y profesional en todos sus proyectos.
