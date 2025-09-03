@@ -1,91 +1,63 @@
-# INFORME DETALLADO STORAGE SERVICE:
+Informe del StorageService
+1. Objetivo del Servicio
+El StorageService es un servicio Angular especializado en la interacción directa con Firebase Storage. Su principal objetivo es gestionar las operaciones de subida y borrado de archivos de manera genérica, proporcionando una solución única y centralizada que se puede utilizar en todas las aplicaciones de Lidertech, desde videojuegos hasta plataformas de comercio electrónico.
 
-# 1. Propósito y Filosofía del Servicio
-El StorageService está diseñado para ser la única capa de abstracción para la gestión de archivos en Firebase Storage dentro de todas tus aplicaciones. Su filosofía es la de un servicio genérico, funcional y reutilizable, encapsulando toda la lógica de interacción con el SDK de Firebase. 
-Al estar centralizado en tu biblioteca lidertechLibCentralModule, asegura que cada proyecto de Lidertech mantenga una convención unificada, código de alta calidad y una arquitectura escalable.
+2. Principios de Diseño
+El servicio está construido siguiendo los siguientes principios clave de tu convención de desarrollo:
 
-El servicio utiliza Angular Signals para la gestión de estados, lo que permite a tus componentes reaccionar de forma óptima a los cambios en el estado de las operaciones (ej. carga, éxito, error) sin usar RxJS, como es tu preferencia.
+Responsabilidad Única: Su única función es manejar las operaciones de almacenamiento de archivos. La lógica de negocio, como la compresión de imágenes o la validación de archivos, se delega a otros servicios (ej. CompressorImageService).
 
-# 2. Funcionalidades y Métodos
-  ## El servicio expone un conjunto de métodos async para realizar todas las operaciones comunes de almacenamiento.
+Universalidad: Utiliza métodos y una arquitectura que le permiten trabajar con cualquier tipo de archivo (imágenes, videos, documentos, etc.), sin necesidad de modificar su código.
 
-* subirArchivo(ruta: string, archivo: File): Promise<UploadTask>:
-  Sube un único archivo a una ruta específica.
-  Este método es útil para subir, por ejemplo, imágenes de perfil ('usuarios/uid/perfil.jpg') o documentos específicos.
-  Retorna la tarea de subida, lo que te permite monitorear el progreso de carga si es necesario.
+Reactividad con Signals: Utiliza Signals para exponer el estado de las operaciones de subida y borrado (states, uploadProgress), permitiendo que los componentes se actualicen de manera eficiente y reactiva sin usar RxJS.
 
-* subirMultiplesArchivos(directorio: string, archivos: File[]): Promise<string[]>:
-  Sube una lista de archivos a un directorio. Ideal para galerías de imágenes o subidas masivas.
-  Retorna un Promise que resuelve con un array de URLs de descarga, lo cual es perfecto para guardar en Firestore.
+Código Limpio y Simple: La implementación es directa y no contiene complejidad innecesaria, lo que facilita su mantenimiento y lectura.
 
-* obtenerUrl(ruta: string): Promise<string>:
-  Recupera la URL pública de un archivo ya subido.
-  Esto es lo que usarás en tus templates para mostrar imágenes (<img [src]="url" />).
+3. Métodos del Servicio
+El StorageService expone dos métodos principales, ambos diseñados para ser genéricos y robustos.
 
-* obtenerMetadatos(ruta: string): Promise<FullMetadata>: 
-Obtiene metadatos del archivo, como su tipo, tamaño y otras propiedades.
+subirArchivo(ruta: string, archivo: File): Promise<string>
 
-* eliminarArchivo(ruta: string): Promise<void>:
-  Elimina un archivo permanentemente de Storage.
+Función: Sube un archivo a una ruta específica en Firebase Storage.
 
-* listarArchivos(directorio: string): Promise<string[]>:
-  Lista todos los archivos de un directorio y retorna un array de sus URLs de descarga.
-  Útil para cargar todas las imágenes de una carpeta en una galería.
+Parámetros:
 
-# 3. Gestión de Estados con StatesEnum
-  
-  ## Una de las características clave del servicio es su señal states, que se actualiza en cada operación.
+ruta: La dirección completa del archivo en el bucket de Storage (ej. 'galeria/mi-imagen.png').
 
-* states.set(StatesEnum.LOADING):
-  Se establece al inicio de cada método para indicar que una operación de carga o procesamiento ha comenzado.
+archivo: El objeto File que se va a subir.
 
-* states.set(StatesEnum.SUCCESS):
-  Se establece al final de cada operación que se completa sin errores, confirmando el éxito.
+Proceso: Inicia una tarea de subida, actualiza las señales de estado y progreso en tiempo real y devuelve una Promise que se resuelve con la URL pública del archivo una vez que la subida ha finalizado.
 
-* states.set(StatesEnum.ERROR):
-  Se establece si ocurre un error en cualquiera de los métodos, lo que permite a los componentes mostrar mensajes de error apropiados al usuario.
+borrarArchivo(rutaStorage: string): Promise<void>
 
-* states.set(StatesEnum.INACTIVE):
-  Es el estado inicial del servicio y el que debería usarse cuando la operación ha finalizado y no se están realizando tareas activas.
+Función: Elimina un archivo de Firebase Storage.
 
-# 4. Cómo Usarlo en tus Componentes
+Parámetros:
 
-## Para usar el StorageService, solo necesitas inyectarlo en el constructor de tu componente.
+rutaStorage: La dirección completa del archivo a borrar en el bucket de Storage.
+
+Proceso: Inicia la operación de borrado y actualiza la señal de estado.
+
+4. Integración con la Arquitectura Lidertech
+El StorageService es una pieza central de la arquitectura de tu biblioteca. Los servicios de lógica de negocio, como el GalleryService, lo utilizan para realizar sus tareas. De esta forma, cualquier aplicación que use tu biblioteca podrá interactuar con Firebase Storage de una manera estandarizada y eficiente.
 
 TypeScript
 
-    import { Component, inject } from '@angular/core';
-    import { StorageService } from './core/services/storage.service';
-    import { StatesEnum } from './shared/enums/states.enum';
-    
-    @Component({
-      selector: 'app-mi-componente',
-      standalone: true,
-      template: `
-        @if (storageService.states() === tant.LOADING) {
-          <div class="loading-spinner">Cargando...</div>
-        } @else if (storageService.states() === tant.SUCCESS) {
-          <div class="success-message">¡Archivo subido con éxito!</div>
-        } @else {
-          <input type="file" (change)="subirImagen($event)" />
-        }
-      `,
-    })
-    export class MiComponente {
-      private storageService = inject(StorageService);
-      public readonly tant = StatesEnum;
-    
-      async subirImagen(event: any) {
-        const file = event.target.files[0];
-        if (file) {
-          try {
-            await this.storageService.subirArchivo('mi-app/imagenes/' + file.name, file);
-            // La URL de descarga se puede obtener de la tarea o con obtenerUrl
-          } catch (error) {
-            console.error('Error al subir la imagen', error);
-          }
-        }
-      }
-    }
+// Ejemplo de uso dentro de GalleryService
+import { StorageService } from './storage.service';
+import { CompressorImageService } from './compressor-image.service';
 
-Como puedes ver en el ejemplo, la signal states te permite usar @if para mostrar la interfaz de usuario en función del estado de la operación de forma simple y declarativa, cumpliendo así con tu convención de usar Signals para la reactividad.
+// ... en el método de subida de GalleryService
+async subirArchivoAGaleria(archivo: File, ...): Promise<void> {
+  // Paso 1: Usar el servicio de compresión
+  const archivoComprimido = await this.compressorImageService.comprimirImagen(archivo);
+
+  // Paso 2: Usar el servicio de almacenamiento genérico para la subida
+  const ruta = `galeria/${archivo.name}`;
+  const url = await this.storageService.subirArchivo(ruta, archivoComprimido);
+
+  // Paso 3: Usar el servicio de escritura para guardar los metadatos
+  // ...
+}
+5. Conclusión
+El StorageService es una solución robusta y bien definida que satisface la necesidad de un servicio de almacenamiento universal para todos tus proyectos. Al delegar la lógica de negocio y mantener una única responsabilidad, el servicio garantiza la calidad, reusabilidad y simplicidad de tu código base, cumpliendo plenamente con tus convenciones de desarrollo.
