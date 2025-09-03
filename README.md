@@ -61,3 +61,48 @@ async subirArchivoAGaleria(archivo: File, ...): Promise<void> {
 }
 5. Conclusión
 El StorageService es una solución robusta y bien definida que satisface la necesidad de un servicio de almacenamiento universal para todos tus proyectos. Al delegar la lógica de negocio y mantener una única responsabilidad, el servicio garantiza la calidad, reusabilidad y simplicidad de tu código base, cumpliendo plenamente con tus convenciones de desarrollo.
+
+
+
+
+
+
+
+
+Reglas de Seguridad para Firebase Storage
+Estas reglas te permiten un control de acceso granular y son perfectas para un proyecto como la galería que requiere áreas públicas y privadas.
+
+Fragmento de código
+
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Regla de seguridad para la galería (acceso de lectura público)
+    // Permite que cualquiera (incluso no autenticado) pueda ver las imágenes.
+    // Solo los usuarios autenticados pueden escribir (subir o borrar).
+    match /galeria/{allFiles=**} {
+      allow read;
+      allow write: if request.auth != null;
+    }
+    
+    // Regla para usuarios (acceso privado)
+    // Permite que un usuario solo pueda leer y escribir en su propia carpeta.
+    // La ruta debe coincidir con el ID de usuario autenticado.
+    match /{userId}/{allFiles=**} {
+      allow read, write: if request.auth.uid == userId;
+    }
+
+    // Regla de seguridad predeterminada (ningún acceso sin las reglas anteriores)
+    // Permite denegar cualquier acceso que no coincida con las reglas de arriba.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
+Cómo funciona
+match /galeria/{allFiles=**}: Esta regla hace que tu galería sea pública de lectura. Esto es crucial para que todos los usuarios puedan ver las imágenes de la galería sin necesidad de iniciar sesión. Sin embargo, para escribir (subir, actualizar o borrar), el usuario debe estar autenticado.
+
+match /{userId}/{allFiles=**}: Esta es la regla para el almacenamiento privado de cada usuario. La ruta de sus archivos debe ser el ID de usuario (request.auth.uid). Esto asegura que cada persona solo pueda subir o acceder a sus propios archivos, manteniendo la privacidad y seguridad de sus datos.
+
+Debes copiar este código y pegarlo en la sección "Rules" de tu proyecto de Firebase Storage en la consola de Firebase. Esto es un paso vital para la configuración completa de tu servicio.
