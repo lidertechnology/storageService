@@ -1,54 +1,59 @@
 import { Injectable, signal } from '@angular/core';
-import { StorageReference,  uploadBytesResumable,  UploadTask,  getDownloadURL,  deleteObject,  listAll,  getMetadata,  FullMetadata,  ref,} from 'firebase/storage';
-import { storage } from '../../firebase/firebase-config';
+import { getMessaging, getToken, onMessage, isSupported, Messaging } from 'firebase/messaging';
+import { app } from '../../firebase/firebase-config';
 import { StatesEnum } from '../../shared/enums/states.enum';
+import { environment } from '../../environments/environment';
 
 @Injectable({
   providedIn: 'root',
 })
-export class StorageService {
+export class MessagingService {
   public readonly states = signal(StatesEnum.INACTIVE);
+  private messaging: Messaging | null = null;
+  public readonly messagePayload = signal<any>(null);
 
-  async subirArchivo(ruta: string, archivo: File): Promise<UploadTask> {
-    this.states.set(StatesEnum.LOADING);
-    const storageRef = ref(storage, ruta);
-    return uploadBytesResumable(storageRef, archivo);
-  }
-
-  async subirMultiplesArchivos(  directorio: string,  archivos: File[]  ): Promise<string[]> {
-    this.states.set(StatesEnum.LOADING);
-    const promesasDeSubida = archivos.map(async (archivo) => {
-      const ruta = `${directorio}/${archivo.name}`;
-      const storageRef = ref(storage, ruta);
-      const snapshot = await uploadBytesResumable(storageRef, archivo);
-      return getDownloadURL(snapshot.ref);
+  constructor() {
+    isSupported().then((supported) => {
+      if (supported) {
+        this.messaging = getMessaging(app);
+        if (environment.firebaseConfig) {
+          // connectMessagingEmulator(this.messaging, "localhost", 5000);
+        }
+      }
     });
-
-    return Promise.all(promesasDeSubida);
   }
 
-  async obtenerUrl(ruta: string): Promise<string> {
+  async obtenerToken(): Promise<string | null> {
     this.states.set(StatesEnum.LOADING);
-    const storageRef = ref(storage, ruta);
-    return getDownloadURL(storageRef);
+    try {
+      if (!this.messaging) {
+        throw new Error('Firebase Cloud Messaging no es soportado en este navegador o no se ha inicializado.');
+      }
+      const permission = await Notification.requestPermission();
+      if (permission === 'granted') {
+        const token = await getToken(this.messaging, {
+          vapidKey: environment.vapidKey,
+        });
+        this.states.set(StatesEnum.SUCCESS);
+        return token;
+      } else if (permission === 'denied') {
+        this.states.set(StatesEnum.UNAUTHORIZED);
+        return null;
+      } else {
+        this.states.set(StatesEnum.INACTIVE);
+        return null;
+      }
+    } catch (error) {
+      this.states.set(StatesEnum.ERROR);
+      throw error;
+    }
   }
 
-  async obtenerMetadatos(ruta: string): Promise<FullMetadata> {
-    this.states.set(StatesEnum.LOADING);
-    const storageRef = ref(storage, ruta);
-    return getMetadata(storageRef);
-  }
-
-  async eliminarArchivo(ruta: string): Promise<void> {
-    this.states.set(StatesEnum.LOADING);
-    const storageRef = ref(storage, ruta);
-    await deleteObject(storageRef);
-  }
-
-  async listarArchivos(directorio: string): Promise<string[]> {
-    this.states.set(StatesEnum.LOADING);
-    const storageRef = ref(storage, directorio);
-    const files = await listAll(storageRef);
-    return Promise.all(files.items.map((fileRef) => getDownloadURL(fileRef)));
+  escucharMensajesEnPrimerPlano(): void {
+    if (this.messaging) {
+      onMessage(this.messaging, (payload) => {
+        this.messagePayload.set(payload);
+      });
+    }
   }
 }
